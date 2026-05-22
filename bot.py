@@ -26,10 +26,9 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ─── STATES ───────────────────────────────────────────────────────────────────
-(REG_ISM, REG_BIZNES_TURI, REG_A, REG_B,
- REG_M1, REG_M2, REG_M3, REG_M4, REG_M5, REG_M6,
- DAILY_SANA, DAILY_METRIKA, DAILY_REJA, DAILY_PLAN,
- EVE_FAKT, EVE_DAROMAD) = range(16)
+(REG_ISM, REG_BIZNES_TURI, REG_A, REG_B, REG_METRIKALARI,
+ DAILY_METRIKA, DAILY_REJA, DAILY_PLAN,
+ EVE_FAKT, EVE_DAROMAD) = range(10)
 
 CHAKANA_METRIKALARI = [
     "Mehmonlar soni",
@@ -81,53 +80,40 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID)
 
-def get_or_create_tab(spreadsheet, tab_name: str, metrikalari: list):
+def get_or_create_tab(spreadsheet, tab_name: str):
     try:
         ws = spreadsheet.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=tab_name, rows=200, cols=15)
-        # Sarlavhalar
-        ws.update("A1:H1", [["Sana", "Metrika", "B nuqta uchun reja", "Plan", "Fakt", "Daromad/Sof foyda", "", ""]])
-        ws.format("A1:H1", {"textFormat": {"bold": True}})
+        ws.update("A1:F1", [["Sana", "Metrika", "B nuqta uchun reja", "Plan", "Fakt", "Daromad/Sof foyda"]])
+        ws.format("A1:F1", {"textFormat": {"bold": True}})
     return ws
 
 def save_registration(tab_name: str, profile: dict):
     spreadsheet = get_sheet()
-    # "Ro'yxat" nomli umumiy sheet
     try:
         ws = spreadsheet.worksheet("Ro'yxat")
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title="Ro'yxat", rows=200, cols=20)
-        headers = ["Ism Familiya", "Biznes turi", "A nuqta", "B nuqta"]
-        metrikalari_all = CHAKANA_METRIKALARI + [m for m in SERVICE_METRIKALARI if m not in CHAKANA_METRIKALARI] + [m for m in DISTRIBUTSIYA_METRIKALARI if m not in SERVICE_METRIKALARI]
-        for m in metrikalari_all:
-            headers += [f"{m} (A)", f"{m} (B)"]
-        ws.update("A1", [headers])
+        ws = spreadsheet.add_worksheet(title="Ro'yxat", rows=200, cols=30)
+        ws.update("A1:D1", [["Ism Familiya", "Biznes turi", "A nuqta", "B nuqta"]])
         ws.format("A1:Z1", {"textFormat": {"bold": True}})
 
     metrikalari = get_metrikalari(profile["biznes_turi"])
-    row = [
-        profile["ism"],
-        profile["biznes_turi"],
-        profile["a_nuqta"],
-        profile["b_nuqta"],
-    ]
-    for i, m in enumerate(metrikalari):
-        key_a = f"m{i+1}_a"
-        key_b = f"m{i+1}_b"
-        row += [profile.get(key_a, ""), profile.get(key_b, "")]
+    row = [profile["ism"], profile["biznes_turi"], profile["a_nuqta"], profile["b_nuqta"]]
+
+    saved_metrikalari = profile.get("saved_metrikalari", {})
+    for m in metrikalari:
+        row.append(saved_metrikalari.get(f"{m}_a", ""))
+        row.append(saved_metrikalari.get(f"{m}_b", ""))
 
     all_vals = ws.get_all_values()
     ws.update(f"A{len(all_vals)+1}", [row])
-
-    # Alohida tab yaratish
-    get_or_create_tab(spreadsheet, tab_name, metrikalari)
+    get_or_create_tab(spreadsheet, tab_name)
 
 def save_morning(tab_name: str, data: dict):
     spreadsheet = get_sheet()
     ws = spreadsheet.worksheet(tab_name)
     all_vals = ws.get_all_values()
-    # Oxirgi qatorni topamiz — agar bugungi sana bor bo'lsa o'sha qatorga, aks holda yangi
     today = data["sana"]
     row_idx = None
     for i, row in enumerate(all_vals):
@@ -158,7 +144,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if profile.get("ism"):
         await update.message.reply_text(
             f"👋 Salom, {profile['ism']}!\n\n"
-            "/kunlik — kunlik hisobot\n"
+            "/kunlik — ertalabki hisobot\n"
             "/kechki — kechki hisobot\n"
             "/profil — profilingiz"
         )
@@ -172,7 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REG_ISM
 
 async def reg_ism(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.setdefault("profile", {})["ism"] = update.message.text.strip()
+    context.user_data["profile"] = {"ism": update.message.text.strip()}
     kb = [["Chakana", "Service", "Distributsiya"]]
     await update.message.reply_text(
         "2️⃣ Biznesingiz turi:",
@@ -183,8 +169,11 @@ async def reg_ism(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reg_biznes_turi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     turi = update.message.text.strip()
     if turi not in ["Chakana", "Service", "Distributsiya"]:
-        await update.message.reply_text("Iltimos, quyidagilardan birini tanlang:", 
-            reply_markup=ReplyKeyboardMarkup([["Chakana", "Service", "Distributsiya"]], one_time_keyboard=True, resize_keyboard=True))
+        kb = [["Chakana", "Service", "Distributsiya"]]
+        await update.message.reply_text(
+            "Iltimos, tugmalardan birini tanlang:",
+            reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True)
+        )
         return REG_BIZNES_TURI
     context.user_data["profile"]["biznes_turi"] = turi
     await update.message.reply_text(
@@ -203,34 +192,42 @@ async def reg_b(update: Update, context: ContextTypes.DEFAULT_TYPE):
     biznes_turi = context.user_data["profile"]["biznes_turi"]
     metrikalari = get_metrikalari(biznes_turi)
     context.user_data["metrikalari"] = metrikalari
-    context.user_data["metrika_step"] = 0
+    context.user_data["metrika_idx"] = 0
+    context.user_data["metrika_is_a"] = True
+    context.user_data["profile"]["saved_metrikalari"] = {}
 
     m = metrikalari[0]
     await update.message.reply_text(
         f"Endi {biznes_turi} biznesining hozirgi holatini aniqlaymiz.\n\n"
         f"5️⃣ {m} — A nuqtada qancha?"
     )
-    return REG_M1
+    return REG_METRIKALARI
 
-async def reg_metrika(update: Update, context: ContextTypes.DEFAULT_TYPE, step: int, next_state):
+async def reg_metrikalari(update: Update, context: ContextTypes.DEFAULT_TYPE):
     metrikalari = context.user_data["metrikalari"]
-    idx = (step - 1) // 2
-    is_a = (step - 1) % 2 == 0
+    idx = context.user_data["metrika_idx"]
+    is_a = context.user_data["metrika_is_a"]
+    m = metrikalari[idx]
 
-    key = f"m{idx+1}_{'a' if is_a else 'b'}"
-    context.user_data["profile"][key] = update.message.text.strip()
+    key = f"{m}_{'a' if is_a else 'b'}"
+    context.user_data["profile"]["saved_metrikalari"][key] = update.message.text.strip()
 
-    # Keyingi savol
     if is_a:
-        m = metrikalari[idx]
+        # B nuqtani so'rash
+        context.user_data["metrika_is_a"] = False
         await update.message.reply_text(f"{m} — B nuqtada qancha?")
+        return REG_METRIKALARI
     else:
         next_idx = idx + 1
         if next_idx < len(metrikalari):
-            m = metrikalari[next_idx]
-            await update.message.reply_text(f"{m} — A nuqtada qancha?")
+            # Keyingi metrika
+            context.user_data["metrika_idx"] = next_idx
+            context.user_data["metrika_is_a"] = True
+            next_m = metrikalari[next_idx]
+            await update.message.reply_text(f"{next_m} — A nuqtada qancha?")
+            return REG_METRIKALARI
         else:
-            # Tugadi — saqlash
+            # Hammasi tugadi — saqlash
             profile = context.user_data["profile"]
             tab_name = profile["ism"][:25]
             context.user_data["profile"]["tab_name"] = tab_name
@@ -241,8 +238,12 @@ async def reg_metrika(update: Update, context: ContextTypes.DEFAULT_TYPE, step: 
                 logger.error(e)
                 msg = "⚠️ Sheets ga saqlashda xato. Admin bilan bog'laning."
 
+            # Eslatmalarni rejalashtirish
+            user_id = update.effective_user.id
+            schedule_reminders(context.application, user_id, profile["ism"])
+
             await update.message.reply_text(
-                f"🎉 Ro'yxatdan o'tdingiz!\n\n"
+                f"🎉 Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n"
                 f"👤 {profile['ism']}\n"
                 f"🏪 {profile['biznes_turi']} biznes\n"
                 f"📊 A nuqta: {profile['a_nuqta']}\n"
@@ -251,36 +252,21 @@ async def reg_metrika(update: Update, context: ContextTypes.DEFAULT_TYPE, step: 
                 f"Har kuni ertalab soat 9:00 da savol keladi! 📅"
             )
             return ConversationHandler.END
-    return next_state
 
-# Har bir metrika uchun handler
-async def reg_m1(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 1, REG_M2)
-async def reg_m2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 2, REG_M3)
-async def reg_m3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 3, REG_M4)
-async def reg_m4(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 4, REG_M5)
-async def reg_m5(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 5, REG_M6)
-async def reg_m6(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await reg_metrika(update, context, 6, ConversationHandler.END)
-
-# ─── ERTALABKI SAVOL (soat 9:00) ─────────────────────────────────────────────
+# ─── ERTALABKI HISOBOT ────────────────────────────────────────────────────────
 async def kunlik_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = context.user_data.get("profile", {})
     if not profile.get("ism"):
         await update.message.reply_text("❌ Avval /start orqali ro'yxatdan o'ting.")
         return ConversationHandler.END
     today = datetime.now(UZ_TZ).strftime("%d.%m.%Y")
+    context.user_data["daily_sana"] = today
     await update.message.reply_text(
         f"🌅 Ertalabki hisobot\n\n"
         f"📅 Bugungi sana: {today}\n\n"
         f"Qaysi metrikaga bugun ta'sir qilmoqchisiz?\n"
         f"(Masalan: Mehmonlar soni, O'rtacha chek...)"
     )
-    context.user_data["daily_sana"] = today
     return DAILY_METRIKA
 
 async def daily_metrika(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,11 +296,11 @@ async def daily_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ Ertalabki hisobot qabul qilindi!\n\n"
-        f"Kechqurun soat 9:00 da fakt va daromadni kiritishni unutmang. 💪\n\n{msg}"
+        f"Kechqurun soat 9:00 da /kechki buyrug'ini yuboring. 💪\n\n{msg}"
     )
     return ConversationHandler.END
 
-# ─── KECHKI SAVOL (soat 21:00) ───────────────────────────────────────────────
+# ─── KECHKI HISOBOT ───────────────────────────────────────────────────────────
 async def kechki_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = context.user_data.get("profile", {})
     if not profile.get("ism"):
@@ -353,62 +339,44 @@ async def eve_daromad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# ─── AVTOMATIK XABAR YUBORISH ─────────────────────────────────────────────────
+# ─── AVTOMATIK ESLATMALAR ─────────────────────────────────────────────────────
 async def send_morning_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Ertalab 9:00 da barcha userlarga yuboriladi"""
     job_data = context.job.data
     user_id = job_data["user_id"]
     ism = job_data["ism"]
     today = datetime.now(UZ_TZ).strftime("%d.%m.%Y")
-    weekday = datetime.now(UZ_TZ).weekday()
-    if weekday == 6:  # Yakshanba
+    if datetime.now(UZ_TZ).weekday() == 6:
         return
     await context.bot.send_message(
         chat_id=user_id,
-        text=(
-            f"🌅 Xayrli tong, {ism}!\n\n"
-            f"📅 Bugun: {today}\n\n"
-            f"Bugungi ertalabki hisobotni to'ldiring 👇\n"
-            f"/kunlik"
-        )
+        text=f"🌅 Xayrli tong, {ism}!\n\n📅 Bugun: {today}\n\nErtalabki hisobotni to'ldiring 👇\n/kunlik"
     )
 
 async def send_evening_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Kechqurun 21:00 da barcha userlarga yuboriladi"""
     job_data = context.job.data
     user_id = job_data["user_id"]
     ism = job_data["ism"]
     today = datetime.now(UZ_TZ).strftime("%d.%m.%Y")
-    weekday = datetime.now(UZ_TZ).weekday()
-    if weekday == 6:  # Yakshanba
+    if datetime.now(UZ_TZ).weekday() == 6:
         return
     await context.bot.send_message(
         chat_id=user_id,
-        text=(
-            f"🌆 Kechqurun eslatma, {ism}!\n\n"
-            f"📅 Bugun: {today}\n\n"
-            f"Kechki hisobotni to'ldiring 👇\n"
-            f"/kechki"
-        )
+        text=f"🌆 Kechqurun eslatma, {ism}!\n\n📅 Bugun: {today}\n\nKechki hisobotni to'ldiring 👇\n/kechki"
     )
 
 def schedule_reminders(app, user_id: int, ism: str):
-    """Userga kunlik eslatmalar qo'shish"""
     job_data = {"user_id": user_id, "ism": ism}
     morning_time = time(hour=9, minute=0, tzinfo=UZ_TZ)
     evening_time = time(hour=21, minute=0, tzinfo=UZ_TZ)
-    app.job_queue.run_daily(
-        send_morning_reminder,
-        time=morning_time,
-        name=f"morning_{user_id}",
-        data=job_data
-    )
-    app.job_queue.run_daily(
-        send_evening_reminder,
-        time=evening_time,
-        name=f"evening_{user_id}",
-        data=job_data
-    )
+    # Eski joblarni o'chirish
+    current_jobs = app.job_queue.get_jobs_by_name(f"morning_{user_id}")
+    for job in current_jobs:
+        job.schedule_removal()
+    current_jobs = app.job_queue.get_jobs_by_name(f"evening_{user_id}")
+    for job in current_jobs:
+        job.schedule_removal()
+    app.job_queue.run_daily(send_morning_reminder, time=morning_time, name=f"morning_{user_id}", data=job_data)
+    app.job_queue.run_daily(send_evening_reminder, time=evening_time, name=f"evening_{user_id}", data=job_data)
 
 # ─── /profil ──────────────────────────────────────────────────────────────────
 async def profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -439,12 +407,7 @@ def main():
             REG_BIZNES_TURI: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_biznes_turi)],
             REG_A: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_a)],
             REG_B: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_b)],
-            REG_M1: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m1)],
-            REG_M2: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m2)],
-            REG_M3: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m3)],
-            REG_M4: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m4)],
-            REG_M5: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m5)],
-            REG_M6: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_m6)],
+            REG_METRIKALARI: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_metrikalari)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -478,3 +441,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
