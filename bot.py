@@ -522,6 +522,36 @@ async def profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 B nuqta: {p.get('b_nuqta')}"
     )
 
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Faqat admin uchun — barcha ishtirokchilar ro'yxati"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Sizda bu buyruqqa ruxsat yo'q.")
+        return
+    try:
+        spreadsheet = get_sheet()
+        ws = spreadsheet.worksheet("Ro'yxat")
+        all_vals = ws.get_all_values()
+        if len(all_vals) <= 1:
+            await update.message.reply_text("📋 Hali hech kim ro'yxatdan o'tmagan.")
+            return
+        rows = all_vals[1:]
+        text = f"👥 Ishtirokchilar ro'yxati — {len(rows)} ta:\n\n"
+        for i, row in enumerate(rows, 1):
+            ism          = row[0] if len(row) > 0 else "—"
+            biznes_nomi  = row[1] if len(row) > 1 else "—"
+            biznes_turi  = row[2] if len(row) > 2 else "—"
+            a            = row[3] if len(row) > 3 else "—"
+            b            = row[4] if len(row) > 4 else "—"
+            text += (
+                f"{i}. 👤 {ism}\n"
+                f"   🏪 {biznes_nomi} ({biznes_turi})\n"
+                f"   📊 A: {a}  →  🎯 B: {b}\n\n"
+            )
+        await update.message.reply_text(text)
+    except Exception as e:
+        logger.error(e)
+        await update.message.reply_text(f"⚠️ Xato: {e}")
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
@@ -564,6 +594,7 @@ def main():
     app.add_handler(kunlik_handler)
     app.add_handler(kechki_handler)
     app.add_handler(CommandHandler("profil", profil))
+    app.add_handler(CommandHandler("users", users))
 
     logger.info("Bot ishga tushdi!")
     app.run_polling()
