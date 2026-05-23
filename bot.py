@@ -140,7 +140,8 @@ async def reg_biznes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Ism: {profile['ism']}\n"
         f"🏪 Biznes: {biznes}\n\n"
         f"{'✅ Google Sheets da joyingiz tayyorlandi!' if sheets_ok else '⚠️ Sheets ga ulanishda xato. Admin bilan bog'laning.'}\n\n"
-        f"📅 Har kuni /kunlik buyrug'i orqali hisobotingizni to'ldiring!")
+        f"📅 Har kuni /kunlik buyrug'i orqali hisobotingizni to'ldiring!"
+    )
     return ConversationHandler.END
 
 # ─── KUNLIK TO'LDIRISH ────────────────────────────────────────────────────────
