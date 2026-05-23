@@ -400,6 +400,18 @@ async def reg_metrikalari(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             schedule_reminders(context.application, update.effective_user.id, profile["ism"])
 
+            # bot_data ga saqlash (admin ko'rishi uchun)
+            if "all_users" not in context.bot_data:
+                context.bot_data["all_users"] = {}
+            context.bot_data["all_users"][update.effective_user.id] = {
+                "ism": profile["ism"],
+                "biznes_nomi": profile.get("biznes_nomi", ""),
+                "biznes_turi": profile["biznes_turi"],
+                "a_nuqta": profile["a_nuqta"],
+                "b_nuqta": profile["b_nuqta"],
+                "bugun": {},
+            }
+
             await update.message.reply_text(
                 f"🎉 Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n"
                 f"👤 {profile['ism']}\n"
@@ -443,6 +455,19 @@ async def daily_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "reja": context.user_data.get("daily_reja", ""),
         "plan": update.message.text.strip(),
     }
+    # bot_data ga bugungi vazifani saqlash (admin ko'rishi uchun)
+    uid = update.effective_user.id
+    if "all_users" not in context.bot_data:
+        context.bot_data["all_users"] = {}
+    if uid not in context.bot_data["all_users"]:
+        context.bot_data["all_users"][uid] = {"ism": profile.get("ism",""), "bugun": {}}
+    context.bot_data["all_users"][uid]["bugun"] = {
+        "sana": data["sana"],
+        "metrika": data["metrika"],
+        "reja": data["reja"],
+        "plan": data["plan"],
+    }
+
     try:
         save_morning(profile["tab_name"], data)
         msg = "✅ Saqlandi!"
@@ -523,7 +548,7 @@ async def profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Faqat admin uchun — barcha ishtirokchilar ro'yxati"""
+    """Admin: barcha ishtirokchilar ro'yxati — Sheets dan o'qiladi"""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Sizda bu buyruqqa ruxsat yo'q.")
         return
@@ -537,11 +562,11 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = all_vals[1:]
         text = f"👥 Ishtirokchilar ro'yxati — {len(rows)} ta:\n\n"
         for i, row in enumerate(rows, 1):
-            ism          = row[0] if len(row) > 0 else "—"
-            biznes_nomi  = row[1] if len(row) > 1 else "—"
-            biznes_turi  = row[2] if len(row) > 2 else "—"
-            a            = row[3] if len(row) > 3 else "—"
-            b            = row[4] if len(row) > 4 else "—"
+            ism         = row[0] if len(row) > 0 else "—"
+            biznes_nomi = row[1] if len(row) > 1 else "—"
+            biznes_turi = row[2] if len(row) > 2 else "—"
+            a           = row[3] if len(row) > 3 else "—"
+            b           = row[4] if len(row) > 4 else "—"
             text += (
                 f"{i}. 👤 {ism}\n"
                 f"   🏪 {biznes_nomi} ({biznes_turi})\n"
@@ -551,6 +576,38 @@ async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(e)
         await update.message.reply_text(f"⚠️ Xato: {e}")
+
+async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: bugungi barcha ishtirokchilarning vazifalari"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Sizda bu buyruqqa ruxsat yo'q.")
+        return
+    today = datetime.now(UZ_TZ).strftime("%d.%m.%Y")
+    all_users = context.bot_data.get("all_users", {})
+    if not all_users:
+        await update.message.reply_text("📋 Hali hech kim bugun hisobot to'ldirmagan.")
+        return
+    text = f"📅 {today} — Bugungi hisobotlar:\n\n"
+    topshirdi = 0
+    topshirmadi_list = []
+    for uid, udata in all_users.items():
+        ism = udata.get("ism", "—")
+        bugun_data = udata.get("bugun", {})
+        if bugun_data.get("sana") == today:
+            topshirdi += 1
+            text += (
+                f"✅ {ism}\n"
+                f"   📊 Metrika: {bugun_data.get('metrika','—')}\n"
+                f"   📝 Reja: {bugun_data.get('reja','—')}\n"
+                f"   🎯 Plan: {bugun_data.get('plan','—')}\n\n"
+            )
+        else:
+            topshirmadi_list.append(ism)
+    if topshirmadi_list:
+        text += f"❌ Hali to'ldirmagan ({len(topshirmadi_list)} ta):\n"
+        for ism in topshirmadi_list:
+            text += f"   • {ism}\n"
+    await update.message.reply_text(text)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
@@ -595,6 +652,7 @@ def main():
     app.add_handler(kechki_handler)
     app.add_handler(CommandHandler("profil", profil))
     app.add_handler(CommandHandler("users", users))
+    app.add_handler(CommandHandler("bugun", bugun))
 
     logger.info("Bot ishga tushdi!")
     app.run_polling()
